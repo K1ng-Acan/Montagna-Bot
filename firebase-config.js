@@ -1,3 +1,6 @@
+const path = require('path');
+const config = require(path.resolve(__dirname, 'config.json'));
+
 // Import the necessary functions from the Firebase SDKs
 const { initializeApp } = require('firebase/app');
 const { getFirestore } = require('firebase/firestore');
