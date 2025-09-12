@@ -28,7 +28,21 @@ module.exports = {
         const url = interaction.options.getString('url');
 
         try {
-            const stream = ytdl(url, { filter: 'audioonly' });
+            // Validate the URL first
+            if (!ytdl.validateURL(url)) {
+                return interaction.editReply('Please provide a valid YouTube URL.');
+            }
+
+            // Get video info for the reply message and for error checking
+            const videoInfo = await ytdl.getInfo(url);
+
+            // Create audio stream with quality filters
+            const stream = ytdl(url, {
+                filter: 'audioonly',
+                quality: 'highestaudio',
+                highWaterMark: 1 << 25 // 32MB buffer
+            });
+
             const resource = createAudioResource(stream);
             const player = createAudioPlayer();
 
@@ -50,16 +64,19 @@ module.exports = {
             queue.set(interaction.guild.id, serverQueue);
 
             player.on(AudioPlayerStatus.Idle, () => {
-                queue.delete(interaction.guild.id); // Clean up when done
+                queue.delete(interaction.guild.id);
                 connection.destroy();
             });
 
-            const videoInfo = await ytdl.getInfo(url);
             await interaction.editReply(`Now playing: **${videoInfo.videoDetails.title}** 🎶`);
 
         } catch (error) {
             console.error(error);
-            await interaction.editReply('Could not play the video. Make sure it is a valid YouTube URL.');
+            if (error.message.includes('No video id found')) {
+                await interaction.editReply('Please provide a valid YouTube URL.');
+            } else {
+                await interaction.editReply('Could not play the video. There might be an issue with the video or with YouTube\'s availability.');
+            }
         }
     },
 };
