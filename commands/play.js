@@ -3,6 +3,23 @@ const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@d
 const play = require('play-dl');
 const { queue } = require('../queue.js');
 
+// Initialize play-dl (only once at startup)
+async function initializePlayDl() {
+    try {
+        await play.setToken({
+            youtube: {
+                cookie: process.env.YOUTUBE_COOKIE // Optional but recommended
+            }
+        });
+        console.log('play-dl initialized successfully');
+    } catch (err) {
+        console.error('play-dl initialization error:', err);
+    }
+}
+
+// Call this when your bot starts
+initializePlayDl();
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('play')
@@ -13,13 +30,11 @@ module.exports = {
                 .setRequired(true)),
 
     async execute(interaction) {
-        // Check if user is in voice channel
         const voiceChannel = interaction.member.voice.channel;
         if (!voiceChannel) {
             return interaction.reply({ content: 'You need to be in a voice channel to play music!', ephemeral: true });
         }
 
-        // Check bot permissions
         const permissions = voiceChannel.permissionsFor(interaction.client.user);
         if (!permissions.has(PermissionFlagsBits.Connect) || !permissions.has(PermissionFlagsBits.Speak)) {
             return interaction.reply({ content: 'I need permissions to join and speak in your voice channel!', ephemeral: true });
@@ -30,23 +45,23 @@ module.exports = {
         try {
             const url = interaction.options.getString('url');
 
-            // Refresh token if needed
-            if (play.is_expired()) {
-                await play.refreshToken();
-            }
-
-            // Validate URL and get stream
-            const validated = await play.validate(url);
-            if (validated === 'search') {
-                return interaction.editReply('Please provide a direct YouTube URL, not a search query.');
-            }
-
             // Get stream info
-            const { stream, type } = await play.stream(url);
+            let stream;
+            try {
+                stream = await play.stream(url);
+            } catch (streamError) {
+                console.error('Stream error:', streamError);
+                // Try refreshing token if stream fails
+                await play.refreshToken();
+                stream = await play.stream(url);
+            }
 
             // Create audio player and resource
             const player = createAudioPlayer();
-            const resource = createAudioResource(stream, { inputType: type });
+            const resource = createAudioResource(stream.stream, { 
+                inputType: stream.type,
+                inlineVolume: true
+            });
             player.play(resource);
 
             // Join voice channel
@@ -72,20 +87,24 @@ module.exports = {
 
             // Clean up when finished
             player.on('idle', () => {
-                queue.delete(interaction.guild.id);
-                connection.destroy();
+                if (queue.get(interaction.guild.id)) {
+                    queue.delete(interaction.guild.id);
+                    connection.destroy();
+                }
             });
 
         } catch (error) {
             console.error('Play error:', error);
             let errorMessage = 'Failed to play the video.';
 
-            if (error.message.includes('Invalid URL')) {
+            if (error.message?.includes('Invalid URL')) {
                 errorMessage = 'Please provide a valid YouTube URL.';
-            } else if (error.message.includes('age restricted')) {
-                errorMessage = 'This video is age restricted and cannot be played.';
-            } else if (error.message.includes('private')) {
+            } else if (error.message?.includes('age restricted')) {
+                errorMessage = 'This video is age restricted. Try another video.';
+            } else if (error.message?.includes('private') || error.message?.includes('unavailable')) {
                 errorMessage = 'This video is private or unavailable.';
+            } else if (error.message?.includes('not found')) {
+                errorMessage = 'Video not found. Please check the URL.';
             }
 
             await interaction.editReply(errorMessage);
