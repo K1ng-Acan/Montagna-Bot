@@ -1,23 +1,25 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
-const ytdl = require('ytdl-core');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
+const play = require('play-dl');
 const { queue } = require('../queue.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('play')
-        .setDescription('Play a song from YouTube.')
+        .setDescription('Play a song from YouTube')
         .addStringOption(option =>
             option.setName('url')
-                .setDescription('The URL of the YouTube video')
+                .setDescription('The YouTube URL to play')
                 .setRequired(true)),
 
     async execute(interaction) {
+        // Check if user is in voice channel
         const voiceChannel = interaction.member.voice.channel;
         if (!voiceChannel) {
             return interaction.reply({ content: 'You need to be in a voice channel to play music!', ephemeral: true });
         }
 
+        // Check bot permissions
         const permissions = voiceChannel.permissionsFor(interaction.client.user);
         if (!permissions.has(PermissionFlagsBits.Connect) || !permissions.has(PermissionFlagsBits.Speak)) {
             return interaction.reply({ content: 'I need permissions to join and speak in your voice channel!', ephemeral: true });
@@ -25,58 +27,68 @@ module.exports = {
 
         await interaction.deferReply();
 
-        const url = interaction.options.getString('url');
-
         try {
-            // Validate the URL first
-            if (!ytdl.validateURL(url)) {
-                return interaction.editReply('Please provide a valid YouTube URL.');
+            const url = interaction.options.getString('url');
+
+            // Refresh token if needed
+            if (play.is_expired()) {
+                await play.refreshToken();
             }
 
-            // Get video info for the reply message and for error checking
-            const videoInfo = await ytdl.getInfo(url);
+            // Validate URL and get stream
+            const validated = await play.validate(url);
+            if (validated === 'search') {
+                return interaction.editReply('Please provide a direct YouTube URL, not a search query.');
+            }
 
-            // Create audio stream with quality filters
-            const stream = ytdl(url, {
-                filter: 'audioonly',
-                quality: 'highestaudio',
-                highWaterMark: 1 << 25 // 32MB buffer
-            });
+            // Get stream info
+            const { stream, type } = await play.stream(url);
 
-            const resource = createAudioResource(stream);
+            // Create audio player and resource
             const player = createAudioPlayer();
-
+            const resource = createAudioResource(stream, { inputType: type });
             player.play(resource);
 
+            // Join voice channel
             const connection = joinVoiceChannel({
                 channelId: voiceChannel.id,
                 guildId: interaction.guild.id,
                 adapterCreator: interaction.guild.voiceAdapterCreator,
             });
-
             connection.subscribe(player);
 
-            // Store the player and connection in our queue
+            // Store in queue
             const serverQueue = {
-                connection: connection,
-                player: player,
+                connection,
+                player,
+                url,
+                voiceChannel
             };
             queue.set(interaction.guild.id, serverQueue);
 
-            player.on(AudioPlayerStatus.Idle, () => {
+            // Get video info
+            const info = await play.video_info(url);
+            await interaction.editReply(`Now playing: **${info.video_details.title}** 🎶`);
+
+            // Clean up when finished
+            player.on('idle', () => {
                 queue.delete(interaction.guild.id);
                 connection.destroy();
             });
 
-            await interaction.editReply(`Now playing: **${videoInfo.videoDetails.title}** 🎶`);
-
         } catch (error) {
-            console.error(error);
-            if (error.message.includes('No video id found')) {
-                await interaction.editReply('Please provide a valid YouTube URL.');
-            } else {
-                await interaction.editReply('Could not play the video. There might be an issue with the video or with YouTube\'s availability.');
+            console.error('Play error:', error);
+            let errorMessage = 'Failed to play the video.';
+
+            if (error.message.includes('Invalid URL')) {
+                errorMessage = 'Please provide a valid YouTube URL.';
+            } else if (error.message.includes('age restricted')) {
+                errorMessage = 'This video is age restricted and cannot be played.';
+            } else if (error.message.includes('private')) {
+                errorMessage = 'This video is private or unavailable.';
             }
+
+            await interaction.editReply(errorMessage);
         }
     },
 };
