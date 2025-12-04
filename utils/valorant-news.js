@@ -1,5 +1,7 @@
 const axios = require('axios');
 const { EmbedBuilder } = require('discord.js');
+const path = require('path');
+const fs = require('fs');
 
 const NEWS_API_URL = 'https://api.henrikdev.xyz/valorant/v1/website/en-us';
 let lastNewsUrl = null;
