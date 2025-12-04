@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
 const { token } = require('./config.json');
+const { checkNews } = require('./utils/valorant-news');
+const { checkLeaks } = require('./utils/valorant-leaks');
 
 // Create a new client instance
 // You will need GuildMembers to grant roles and get member details.
@@ -46,6 +48,22 @@ for (const file of commandFiles) {
 // Client ready event
 client.once(Events.ClientReady, c => {
   console.log(`Ready! Logged in as ${c.user.tag}`);
+
+  // --- VALORANT ALERTS SETUP ---
+  console.log('Starting Valorant Alert Systems...');
+
+  // 1. Run immediately on startup
+  checkNews(client);
+  checkLeaks(client);
+
+  // 2. Schedule periodic checks (every 5 minutes = 300,000 ms)
+  setInterval(() => {
+      checkNews(client);
+  }, 300000);
+
+  setInterval(() => {
+      checkLeaks(client);
+  }, 300000);
 });
 
 // Handle ALL interactions (slash commands and autocomplete)
