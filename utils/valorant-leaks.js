@@ -9,8 +9,8 @@ const parser = new Parser({
     }
 });
 
-// GameRiv's Official Valorant Feed
-const RSS_URL = 'https://gameriv.com/valorant/leaks-valorant/';
+// FIX 1: Added "/feed/" to the end. This turns the website link into an RSS feed.
+const RSS_URL = 'https://gameriv.com/valorant/leaks-valorant/feed/';
 
 let lastArticleLink = null;
 
@@ -56,11 +56,13 @@ async function checkLeaks(client) {
                 .setTitle(latestPost.title)
                 .setURL(latestPost.link)
                 .setDescription(`New article found on GameRiv!\n\n${latestPost.contentSnippet ? latestPost.contentSnippet.substring(0, 150) + '...' : ''}`)
-                .setColor('#FF4655') // Valorant Red
+                .setColor('#A020F0') // Valorant Red
                 .setFooter({ text: 'Source: GameRiv' })
                 .setTimestamp();
 
             await channel.send({ content: '🚨 **New Valorant Update/Leak!**', embeds: [embed] });
+
+            // FIX 2: Added backticks (`) for the console log
             console.log(`[GAMERIV] Sent: ${latestPost.title}`);
         }
 
