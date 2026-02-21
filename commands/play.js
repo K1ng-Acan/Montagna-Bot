@@ -1,15 +1,15 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require('@discordjs/voice');
-const youtubedl = require('youtube-dl-exec');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
+const play = require('play-dl');
 const { queue } = require('../queue.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('play')
-        .setDescription('Play a song from YouTube')
+        .setDescription('Play a song (Powered by SoundCloud)')
         .addStringOption(option =>
-            option.setName('url')
-                .setDescription('The YouTube URL to play')
+            option.setName('query')
+                .setDescription('The name of the song or a SoundCloud URL')
                 .setRequired(true)),
 
     async execute(interaction) {
@@ -26,39 +26,42 @@ module.exports = {
         await interaction.deferReply();
 
         try {
-            const url = interaction.options.getString('url');
+            const query = interaction.options.getString('query');
+            let trackInfo;
 
-            // --- THE FINAL BYPASS SETTINGS ---
-            const dlOptions = {
-                dumpSingleJson: true,
-                noCheckCertificates: true,
-                noWarnings: true,
-                format: 'bestaudio/best',
-                // 1. Force IPv4: Datacenter IPv6 addresses are flagged as bots by default.
-                forceIpv4: true, 
-                // 2. Clear Cache: Deletes any previously blocked session data
-                rmCacheDir: true,
-                // 3. Client Spoofing: Try mobile clients first, fallback to web
-                extractorArgs: 'youtube:player_client=ios,android,web'
-            };
-
-            // Fetch data
-            const videoInfo = await youtubedl(url, dlOptions);
-
-            if (!videoInfo || !videoInfo.url) {
-                return interaction.editReply('Failed to extract audio stream from that URL.');
+            // 1. If it's a YouTube link, reject it nicely
+            if (query.includes('youtube.com') || query.includes('youtu.be')) {
+                return interaction.editReply('❌ YouTube links are currently blocked by Google. Please type the **name of the song** instead (e.g., `/play shape of you`).');
             }
 
-            // Create Player
-            const resource = createAudioResource(videoInfo.url, { 
-                inputType: StreamType.Arbitrary,
+            // 2. Search SoundCloud
+            if (query.includes('soundcloud.com')) {
+                // It's a direct SoundCloud link
+                trackInfo = await play.soundcloud(query);
+            } else {
+                // It's a text search (e.g., "Avicii Wake Me Up")
+                const searchResults = await play.search(query, {
+                    limit: 1,
+                    source: { soundcloud: 'tracks' }
+                });
+
+                if (!searchResults || searchResults.length === 0) {
+                    return interaction.editReply('Could not find that song on SoundCloud. Try being more specific!');
+                }
+                trackInfo = searchResults[0];
+            }
+
+            // 3. Create Audio Stream
+            const stream = await play.stream(trackInfo.url);
+            const resource = createAudioResource(stream.stream, { 
+                inputType: stream.type,
                 inlineVolume: true 
             });
 
             const player = createAudioPlayer();
             player.play(resource);
 
-            // Connect
+            // 4. Connect to Voice Channel
             const connection = joinVoiceChannel({
                 channelId: voiceChannel.id,
                 guildId: interaction.guild.id,
@@ -66,17 +69,18 @@ module.exports = {
             });
             connection.subscribe(player);
 
+            // 5. Store in Queue
             const serverQueue = {
                 connection,
                 player,
-                url,
+                url: trackInfo.url,
                 voiceChannel
             };
             queue.set(interaction.guild.id, serverQueue);
 
-            await interaction.editReply(`Now playing: **${videoInfo.title}** 🎶`);
+            await interaction.editReply(`Now playing: **${trackInfo.name}** 🎶`);
 
-            // Cleanup
+            // 6. Cleanup when finished
             player.on(AudioPlayerStatus.Idle, () => {
                 const currentQueue = queue.get(interaction.guild.id);
                 if (currentQueue) {
@@ -92,16 +96,8 @@ module.exports = {
             });
 
         } catch (error) {
-            console.error('yt-dlp error:', error.message);
-
-            let errorMessage = 'Failed to play the video.';
-            if (error.message.includes('Sign in') || error.message.includes('bot')) {
-                errorMessage = 'YouTube blocked the connection. Try again, or try a different video.';
-            } else if (error.message.includes('not a valid URL')) {
-                errorMessage = 'Please provide a valid YouTube URL.';
-            }
-
-            await interaction.editReply(errorMessage);
+            console.error('SoundCloud play error:', error);
+            await interaction.editReply('Failed to play the track. Something went wrong.');
         }
     },
 };
