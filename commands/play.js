@@ -28,19 +28,21 @@ module.exports = {
         try {
             const url = interaction.options.getString('url');
 
-            // --- THE ULTIMATE BYPASS ---
+            // --- THE FINAL BYPASS SETTINGS ---
             const dlOptions = {
                 dumpSingleJson: true,
                 noCheckCertificates: true,
                 noWarnings: true,
-                // FALLBACK FORMAT: Ask for pure audio first. If the mobile API doesn't have it, 
-                // just grab the 'best' overall format (video+audio) to prevent the format crash.
-                format: 'bestaudio/best', 
-                // BYPASS: Spoof as an iOS/Android device. This bypasses the Web Datacenter CAPTCHA block.
-                extractorArgs: 'youtube:player_client=ios,android,web' 
+                format: 'bestaudio/best',
+                // 1. Force IPv4: Datacenter IPv6 addresses are flagged as bots by default.
+                forceIpv4: true, 
+                // 2. Clear Cache: Deletes any previously blocked session data
+                rmCacheDir: true,
+                // 3. Client Spoofing: Try mobile clients first, fallback to web
+                extractorArgs: 'youtube:player_client=ios,android,web'
             };
 
-            // Fetch data (NO cookies used here)
+            // Fetch data
             const videoInfo = await youtubedl(url, dlOptions);
 
             if (!videoInfo || !videoInfo.url) {
@@ -94,7 +96,7 @@ module.exports = {
 
             let errorMessage = 'Failed to play the video.';
             if (error.message.includes('Sign in') || error.message.includes('bot')) {
-                errorMessage = 'YouTube blocked the request. Try playing a different video.';
+                errorMessage = 'YouTube blocked the connection. Try again, or try a different video.';
             } else if (error.message.includes('not a valid URL')) {
                 errorMessage = 'Please provide a valid YouTube URL.';
             }
