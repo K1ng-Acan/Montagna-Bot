@@ -26,12 +26,25 @@ module.exports = {
         await interaction.deferReply();
 
         try {
+            // --- SOUNDCLOUD FIX: Manually grab the required Client ID ---
+            try {
+                const clientID = await play.getFreeClientID();
+                await play.setToken({
+                    soundcloud: {
+                        client_id: clientID
+                    }
+                });
+            } catch (err) {
+                console.error('Failed to fetch SoundCloud Client ID:', err.message);
+            }
+            // -------------------------------------------------------------
+
             const query = interaction.options.getString('query');
             let trackInfo;
 
             // 1. If it's a YouTube link, reject it nicely
             if (query.includes('youtube.com') || query.includes('youtu.be')) {
-                return interaction.editReply('❌ YouTube links are currently blocked by Google. Please type the **name of the song** instead (e.g., `/play shape of you`).');
+                return interaction.editReply('❌ YouTube links are currently blocked. Please type the **name of the song** instead (e.g., `/play shape of you`).');
             }
 
             // 2. Search SoundCloud
@@ -97,7 +110,7 @@ module.exports = {
 
         } catch (error) {
             console.error('SoundCloud play error:', error);
-            await interaction.editReply('Failed to play the track. Something went wrong.');
+            await interaction.editReply('Failed to play the track. Please try again.');
         }
     },
 };
