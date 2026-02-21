@@ -30,17 +30,16 @@ module.exports = {
         try {
             const url = interaction.options.getString('url');
 
-            // 1. Prepare yt-dlp arguments
+            // 1. Cleaned up yt-dlp arguments
             const dlOptions = {
                 dumpSingleJson: true,
                 noCheckCertificates: true,
                 noWarnings: true,
-                preferFreeFormats: true,
-                format: 'bestaudio/best',
-                extractorArgs: 'youtube:player_client=ios,android,tv' // Still helps bypass some restrictions
+                format: 'bestaudio', // Ask for the best audio stream
+                addHeader: ['referer:youtube.com'] 
             };
 
-            // 2. Check if cookies.txt exists, and if so, attach it to bypass the block!
+            // 2. Attach cookies to bypass the Cloud server IP block
             const cookiesPath = path.join(__dirname, '../cookies.txt');
             if (fs.existsSync(cookiesPath)) {
                 dlOptions.cookies = cookiesPath;
@@ -102,9 +101,11 @@ module.exports = {
 
             let errorMessage = 'Failed to play the video.';
             if (error.message.includes('Sign in') || error.message.includes('bot')) {
-                errorMessage = 'YouTube blocked the server IP. Please make sure cookies.txt is uploaded and valid.';
+                errorMessage = 'YouTube blocked the server IP. Please make sure cookies.txt is valid and not expired.';
             } else if (error.message.includes('not a valid URL')) {
                 errorMessage = 'Please provide a valid YouTube URL.';
+            } else if (error.message.includes('Requested format is not available')) {
+                errorMessage = 'YouTube did not provide a standard audio stream for this specific video.';
             }
 
             await interaction.editReply(errorMessage);
