@@ -6,7 +6,7 @@ const { queue } = require('../queue.js');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('play')
-        .setDescription('Play a song from YouTube (Powered by yt-dlp)')
+        .setDescription('Play a song from YouTube')
         .addStringOption(option =>
             option.setName('url')
                 .setDescription('The YouTube URL to play')
@@ -23,27 +23,27 @@ module.exports = {
             return interaction.reply({ content: 'I need permissions to join and speak in your voice channel!', ephemeral: true });
         }
 
-        // Defer reply because yt-dlp can take a few seconds to fetch the data
         await interaction.deferReply();
 
         try {
             const url = interaction.options.getString('url');
 
-            // 1. Use yt-dlp to bypass protections and get the raw audio stream
+            // --- THE MAGIC FIX IS HERE ---
+            // We tell yt-dlp to use iOS and Android TV API clients instead of the Web client.
+            // This bypasses the "Sign in to confirm you're not a bot" IP block.
             const videoInfo = await youtubedl(url, {
                 dumpSingleJson: true,
                 noCheckCertificates: true,
                 noWarnings: true,
                 preferFreeFormats: true,
-                format: 'bestaudio/best', // Tell yt-dlp we only want the best audio
-                addHeader: ['referer:youtube.com', 'user-agent:googlebot'] // Pretend to be Google to bypass blocks
+                format: 'bestaudio/best',
+                extractorArgs: 'youtube:player_client=ios,android,tv' 
             });
 
             if (!videoInfo || !videoInfo.url) {
                 return interaction.editReply('Failed to extract audio stream from that URL.');
             }
 
-            // 2. Create Audio Resource directly from the extracted URL
             const resource = createAudioResource(videoInfo.url, { 
                 inputType: StreamType.Arbitrary,
                 inlineVolume: true 
@@ -52,7 +52,6 @@ module.exports = {
             const player = createAudioPlayer();
             player.play(resource);
 
-            // 3. Join Voice Channel
             const connection = joinVoiceChannel({
                 channelId: voiceChannel.id,
                 guildId: interaction.guild.id,
@@ -60,7 +59,6 @@ module.exports = {
             });
             connection.subscribe(player);
 
-            // 4. Queue Management
             const serverQueue = {
                 connection,
                 player,
@@ -71,7 +69,6 @@ module.exports = {
 
             await interaction.editReply(`Now playing: **${videoInfo.title}** 🎶`);
 
-            // 5. Cleanup when the song ends
             player.on(AudioPlayerStatus.Idle, () => {
                 const currentQueue = queue.get(interaction.guild.id);
                 if (currentQueue) {
@@ -90,8 +87,8 @@ module.exports = {
             console.error('yt-dlp error:', error.message);
 
             let errorMessage = 'Failed to play the video.';
-            if (error.message.includes('Sign in')) {
-                errorMessage = 'YouTube refused the connection (Age-restricted or blocked).';
+            if (error.message.includes('Sign in') || error.message.includes('bot')) {
+                errorMessage = 'YouTube blocked the server IP. Trying a different song might work.';
             } else if (error.message.includes('not a valid URL')) {
                 errorMessage = 'Please provide a valid YouTube URL.';
             }
