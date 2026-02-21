@@ -2,8 +2,6 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require('@discordjs/voice');
 const youtubedl = require('youtube-dl-exec');
 const { queue } = require('../queue.js');
-const fs = require('fs');
-const path = require('path');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -30,31 +28,26 @@ module.exports = {
         try {
             const url = interaction.options.getString('url');
 
-            // 1. Cleaned up yt-dlp arguments
+            // --- THE ULTIMATE BYPASS ---
             const dlOptions = {
                 dumpSingleJson: true,
                 noCheckCertificates: true,
                 noWarnings: true,
-                format: 'bestaudio', // Ask for the best audio stream
-                addHeader: ['referer:youtube.com'] 
+                // FALLBACK FORMAT: Ask for pure audio first. If the mobile API doesn't have it, 
+                // just grab the 'best' overall format (video+audio) to prevent the format crash.
+                format: 'bestaudio/best', 
+                // BYPASS: Spoof as an iOS/Android device. This bypasses the Web Datacenter CAPTCHA block.
+                extractorArgs: 'youtube:player_client=ios,android,web' 
             };
 
-            // 2. Attach cookies to bypass the Cloud server IP block
-            const cookiesPath = path.join(__dirname, '../cookies.txt');
-            if (fs.existsSync(cookiesPath)) {
-                dlOptions.cookies = cookiesPath;
-            } else {
-                console.warn('[MUSIC WARNING] No cookies.txt found! YouTube might block the request.');
-            }
-
-            // 3. Fetch data
+            // Fetch data (NO cookies used here)
             const videoInfo = await youtubedl(url, dlOptions);
 
             if (!videoInfo || !videoInfo.url) {
                 return interaction.editReply('Failed to extract audio stream from that URL.');
             }
 
-            // 4. Create Player
+            // Create Player
             const resource = createAudioResource(videoInfo.url, { 
                 inputType: StreamType.Arbitrary,
                 inlineVolume: true 
@@ -63,7 +56,7 @@ module.exports = {
             const player = createAudioPlayer();
             player.play(resource);
 
-            // 5. Connect
+            // Connect
             const connection = joinVoiceChannel({
                 channelId: voiceChannel.id,
                 guildId: interaction.guild.id,
@@ -81,7 +74,7 @@ module.exports = {
 
             await interaction.editReply(`Now playing: **${videoInfo.title}** 🎶`);
 
-            // 6. Cleanup
+            // Cleanup
             player.on(AudioPlayerStatus.Idle, () => {
                 const currentQueue = queue.get(interaction.guild.id);
                 if (currentQueue) {
@@ -101,11 +94,9 @@ module.exports = {
 
             let errorMessage = 'Failed to play the video.';
             if (error.message.includes('Sign in') || error.message.includes('bot')) {
-                errorMessage = 'YouTube blocked the server IP. Please make sure cookies.txt is valid and not expired.';
+                errorMessage = 'YouTube blocked the request. Try playing a different video.';
             } else if (error.message.includes('not a valid URL')) {
                 errorMessage = 'Please provide a valid YouTube URL.';
-            } else if (error.message.includes('Requested format is not available')) {
-                errorMessage = 'YouTube did not provide a standard audio stream for this specific video.';
             }
 
             await interaction.editReply(errorMessage);
